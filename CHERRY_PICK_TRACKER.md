@@ -36,8 +36,8 @@ These fixes are already part of the fork's `main` branch:
 
 | Status | PR | Title | Impact | Notes |
 |--------|----|-------|--------|-------|
-| [ ] | [#350](https://github.com/google/langextract/pull/350) | Fix incorrect `char_interval` for non-ASCII text (Fixes #334) | Fixes `RegexTokenizer` merging Latin + CJK characters. Fork already has #284 which may overlap. | Draft. Check if #334 is still reproducible. |
-| [ ] | [#257](https://github.com/google/langextract/pull/257) | Add retry mechanism for transient API errors (503, 429, timeouts) | Exponential backoff for LLM API failures. Useful but large (XL, 997 lines), no reviews. | Consider implementing simpler retry in our worker instead. |
+| [x] | [#350](https://github.com/google/langextract/pull/350) | Fix incorrect `char_interval` for non-ASCII text (Fixes #334) | Fixes `RegexTokenizer` merging Latin + CJK characters. Uses regex V1 set subtraction to separate CJK scripts from Latin in token patterns. | Applied manually. Adds `_CJK_SCRIPTS`, `_CJK_PATTERN`, and modifies `_LETTERS_PATTERN` with V1 set subtraction. 142→421 tests pass (new retry tests included). |
+| [x] | [#257](https://github.com/google/langextract/pull/257) | Add retry mechanism for transient API errors (503, 429, timeouts) | Exponential backoff with jitter for transient LLM failures. Chunk-level retry in annotation pipeline preserves successful chunks. | Applied via `git apply --reject` + manual conflict resolution. New files: `retry_utils.py` (278 lines), `retry_utils_test.py` (300 lines). Modified: `annotation.py`, `extraction.py`, `gemini.py`, `annotation_test.py`. Complementary to litellm's provider-level `num_retries`. |
 | [ ] | [#356](https://github.com/google/langextract/pull/356) | Remove duplicate `model_id` assignment in `factory.create_model()` | Tiny cleanup (XS). Low risk, easy cherry-pick. | |
 | [ ] | [#32](https://github.com/google/langextract/pull/32) | Multi-language tokenizer support | **Already in fork** as #284. | Skip — already included. |
 
@@ -71,6 +71,10 @@ These fixes are already part of the fork's `main` branch:
 |------|----|---------|--------|--------|
 | 2026-02-17 | #351/#349 | Manual apply | factory.py: moved `load_builtins_once()`/`load_plugins_once()` before provider conditional | main |
 | 2026-02-17 | #327 | Manual apply | extraction.py: added `_filter_ungrounded_extractions()` + `require_grounding` param | main |
+| 2026-02-18 | #375 | `c2bd1bb` | annotation.py: `suppress_parse_errors` at annotation level, merged with `require_grounding` from #327 | custom |
+| 2026-02-18 | #374 | `4028976` | resolver.py: Unicode normalization (CJK radicals), trailing commas, multiple fenced blocks | custom |
+| 2026-02-18 | #350 | Manual apply | tokenizer.py: CJK script separation via regex V1 set subtraction (`_CJK_SCRIPTS`, `_CJK_PATTERN`) | custom |
+| 2026-02-18 | #257 | Manual apply | retry_utils.py (new), annotation.py, extraction.py, gemini.py: transient error retry with exponential backoff + jitter | custom |
 
 ---
 

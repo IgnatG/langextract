@@ -36,6 +36,7 @@ from langextract import chunking
 from langextract import progress
 from langextract import prompting
 from langextract import resolver as resolver_lib
+from langextract import retry_utils
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions
@@ -349,6 +350,11 @@ class Annotator:
       extraction_passes: int = 1,
       context_window_chars: int | None = None,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
@@ -376,6 +382,11 @@ class Annotator:
         include as context for the current chunk. Helps with coreference
         resolution across chunk boundaries. Defaults to None (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
+      retry_transient_errors: Whether to retry on transient errors. Defaults to True.
+      max_retries: Maximum number of retry attempts. Defaults to 3.
+      retry_initial_delay: Initial delay before retry in seconds. Defaults to 1.0.
+      retry_backoff_factor: Backoff multiplier for retries. Defaults to 2.0.
+      retry_max_delay: Maximum delay between retries in seconds. Defaults to 60.0.
       tokenizer: Optional tokenizer to use. If None, uses default tokenizer.
       **kwargs: Additional arguments passed to LanguageModel.infer and Resolver.
 
@@ -396,6 +407,11 @@ class Annotator:
           batch_length,
           debug,
           show_progress,
+          retry_transient_errors=retry_transient_errors,
+          max_retries=max_retries,
+          retry_initial_delay=retry_initial_delay,
+          retry_backoff_factor=retry_backoff_factor,
+          retry_max_delay=retry_max_delay,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
@@ -409,6 +425,11 @@ class Annotator:
           debug,
           extraction_passes,
           show_progress,
+          retry_transient_errors=retry_transient_errors,
+          max_retries=max_retries,
+          retry_initial_delay=retry_initial_delay,
+          retry_backoff_factor=retry_backoff_factor,
+          retry_max_delay=retry_max_delay,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
@@ -422,6 +443,11 @@ class Annotator:
       batch_length: int,
       debug: bool,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
@@ -434,6 +460,25 @@ class Annotator:
 
     When context_window_chars is set, includes text from the previous chunk as
     context for coreference resolution across chunk boundaries.
+
+    Args:
+      documents: Iterable of documents to annotate.
+      resolver: Resolver for processing inference results.
+      max_char_buffer: Maximum character buffer for chunking.
+      batch_length: Number of chunks to process in each batch.
+      debug: Whether to enable debug logging.
+      show_progress: Whether to show progress bar.
+      retry_transient_errors: Whether to retry on transient errors.
+      max_retries: Maximum number of retry attempts.
+      retry_initial_delay: Initial delay before retry.
+      retry_backoff_factor: Backoff multiplier for retries.
+      retry_max_delay: Maximum delay between retries.
+      context_window_chars: Characters from previous chunk for context.
+      tokenizer: Optional tokenizer to use.
+      **kwargs: Additional arguments passed to language model.
+
+    Yields:
+      AnnotatedDocument objects with extracted data.
     """
     doc_order: list[str] = []
     doc_text_by_id: dict[str, str] = {}
@@ -521,7 +566,17 @@ class Annotator:
           except AttributeError:
             pass
 
-        outputs = self._language_model.infer(batch_prompts=prompts, **kwargs)
+        # Process batch with individual chunk retry capability
+        outputs = list(self._process_batch_with_retry(
+            batch_prompts=prompts,
+            batch=batch,
+            retry_transient_errors=retry_transient_errors,
+            max_retries=max_retries,
+            retry_initial_delay=retry_initial_delay,
+            retry_backoff_factor=retry_backoff_factor,
+            retry_max_delay=retry_max_delay,
+            **kwargs,
+        ))
         if not isinstance(outputs, list):
           outputs = list(outputs)
 
@@ -606,11 +661,37 @@ class Annotator:
       debug: bool,
       extraction_passes: int,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       context_window_chars: int | None = None,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> Iterator[data.AnnotatedDocument]:
-    """Sequential extraction passes logic for improved recall."""
+    """Sequential extraction passes logic for improved recall.
+
+    Args:
+      documents: Iterable of documents to annotate.
+      resolver: Resolver for processing inference results.
+      max_char_buffer: Maximum character buffer for chunking.
+      batch_length: Number of chunks to process in each batch.
+      debug: Whether to enable debug logging.
+      extraction_passes: Number of extraction passes to perform.
+      show_progress: Whether to show progress bar.
+      retry_transient_errors: Whether to retry on transient errors.
+      max_retries: Maximum number of retry attempts.
+      retry_initial_delay: Initial delay before retry.
+      retry_backoff_factor: Backoff multiplier for retries.
+      retry_max_delay: Maximum delay between retries.
+      context_window_chars: Characters from previous chunk for context.
+      tokenizer: Optional tokenizer to use.
+      **kwargs: Additional arguments passed to language model.
+
+    Yields:
+      AnnotatedDocument objects with merged extracted data.
+    """
 
     logging.info(
         "Starting sequential extraction passes for improved recall with %d"
@@ -639,6 +720,11 @@ class Annotator:
           batch_length,
           debug=(debug and pass_num == 0),
           show_progress=show_progress if pass_num == 0 else False,
+          retry_transient_errors=retry_transient_errors,
+          max_retries=max_retries,
+          retry_initial_delay=retry_initial_delay,
+          retry_backoff_factor=retry_backoff_factor,
+          retry_max_delay=retry_max_delay,
           context_window_chars=context_window_chars,
           tokenizer=tokenizer,
           **kwargs,
@@ -693,6 +779,11 @@ class Annotator:
       extraction_passes: int = 1,
       context_window_chars: int | None = None,
       show_progress: bool = True,
+      retry_transient_errors: bool = True,
+      max_retries: int = 3,
+      retry_initial_delay: float = 1.0,
+      retry_backoff_factor: float = 2.0,
+      retry_max_delay: float = 60.0,
       tokenizer: tokenizer_lib.Tokenizer | None = None,
       **kwargs,
   ) -> data.AnnotatedDocument:
@@ -714,6 +805,11 @@ class Annotator:
         include as context for coreference resolution. Defaults to None
         (disabled).
       show_progress: Whether to show progress bar. Defaults to True.
+      retry_transient_errors: Whether to retry on transient errors. Defaults to True.
+      max_retries: Maximum number of retry attempts. Defaults to 3.
+      retry_initial_delay: Initial delay before retry in seconds. Defaults to 1.0.
+      retry_backoff_factor: Backoff multiplier for retries. Defaults to 2.0.
+      retry_max_delay: Maximum delay between retries in seconds. Defaults to 60.0.
       tokenizer: Optional tokenizer instance.
       **kwargs: Additional arguments for inference and resolver_lib.
 
@@ -745,6 +841,11 @@ class Annotator:
             extraction_passes=extraction_passes,
             context_window_chars=context_window_chars,
             show_progress=show_progress,
+            retry_transient_errors=retry_transient_errors,
+            max_retries=max_retries,
+            retry_initial_delay=retry_initial_delay,
+            retry_backoff_factor=retry_backoff_factor,
+            retry_max_delay=retry_max_delay,
             tokenizer=tokenizer,
             **kwargs,
         )

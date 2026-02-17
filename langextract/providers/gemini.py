@@ -200,6 +200,7 @@ class GeminiLanguageModel(base_model.BaseLanguageModel):  # pylint: disable=too-
           'Set format_type=JSON or use_schema_constraints=False.'
       )
 
+  @retry_utils.retry_chunk_processing()
   def _process_single_prompt(
       self, prompt: str, config: dict
   ) -> core_types.ScoredOutput:

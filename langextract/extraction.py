@@ -94,6 +94,11 @@ def extract(
     prompt_validation_level: pv.PromptValidationLevel = pv.PromptValidationLevel.WARNING,
     prompt_validation_strict: bool = False,
     show_progress: bool = True,
+    retry_transient_errors: bool = True,
+    max_retries: int = 3,
+    retry_initial_delay: float = 1.0,
+    retry_backoff_factor: float = 2.0,
+    retry_max_delay: float = 60.0,
     tokenizer: tokenizer_lib.Tokenizer | None = None,
     require_grounding: bool = False,
 ) -> list[data.AnnotatedDocument] | data.AnnotatedDocument:
@@ -197,6 +202,12 @@ def extract(
         prompt_validation_strict: When True and prompt_validation_level is ERROR,
           raises on non-exact matches (MATCH_FUZZY, MATCH_LESSER). Defaults to False.
         show_progress: Whether to show progress bar during extraction. Defaults to True.
+        retry_transient_errors: Whether to automatically retry on transient errors
+          like 503 "model overloaded". Defaults to True.
+        max_retries: Maximum number of retry attempts for transient errors. Defaults to 3.
+        retry_initial_delay: Initial delay in seconds before first retry. Defaults to 1.0.
+        retry_backoff_factor: Multiplier for exponential backoff between retries. Defaults to 2.0.
+        retry_max_delay: Maximum delay between retries in seconds. Defaults to 60.0.
         require_grounding: Whether to filter out extractions that cannot be
           grounded to specific character positions in the source text. When True,
           only extractions with valid char_interval (non-None start_pos and
@@ -369,6 +380,16 @@ def extract(
         prompt_template=prompt_template,
         format_handler=format_handler,
     )
+
+    # Add retry parameters to alignment kwargs
+    retry_kwargs = {
+        "retry_transient_errors": retry_transient_errors,
+        "max_retries": max_retries,
+        "retry_initial_delay": retry_initial_delay,
+        "retry_backoff_factor": retry_backoff_factor,
+        "retry_max_delay": retry_max_delay,
+    }
+    alignment_kwargs.update(retry_kwargs)
 
     if isinstance(text_or_documents, str):
         result = annotator.annotate_text(
