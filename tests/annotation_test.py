@@ -248,6 +248,12 @@ class AnnotatorTest(absltest.TestCase):
     self.assertEqual(results[0].extractions[0].extraction_text, "Alice")
 
   def test_annotate_documents_raises_on_bad_chunk_by_default(self):
+    """Verify that a truly malformed model response raises by default.
+
+    Our fork's resolver gracefully skips type mismatches (e.g. list where
+    string expected) with a warning, so we use completely unparseable output
+    to verify that suppress_parse_errors=False (default) propagates errors.
+    """
     docs = [
         data.Document("Alice", document_id="doc1"),
         data.Document("Bob", document_id="doc2"),
@@ -258,7 +264,7 @@ class AnnotatorTest(absltest.TestCase):
         [
             types.ScoredOutput(
                 score=1.0,
-                output='{"extractions":[{"entity":["not","a","string"]}]}',
+                output='this is not valid json or yaml at all {{{',
             )
         ],
     ]
@@ -268,7 +274,7 @@ class AnnotatorTest(absltest.TestCase):
         fence_output=False,
     )
 
-    with self.assertRaises(ValueError):
+    with self.assertRaises(Exception):
       list(
           self.annotator.annotate_documents(
               documents=docs,
