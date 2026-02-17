@@ -23,6 +23,7 @@ from typing import Any, Final, Iterator, Sequence
 
 from absl import logging
 
+from langextract import retry_utils
 from langextract.core import base_model
 from langextract.core import data
 from langextract.core import exceptions

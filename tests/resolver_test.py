@@ -2411,7 +2411,8 @@ class FenceFallbackTest(parameterized.TestCase):
     def test_multiple_fenced_blocks_uses_single_valid_block_in_non_strict_mode(
         self,
     ):
-        test_input = textwrap.dedent("""\
+        test_input = textwrap.dedent(
+            """\
             preamble
             ```json
             {"extractions": [{"item": "first"}]
@@ -2419,7 +2420,8 @@ class FenceFallbackTest(parameterized.TestCase):
             Some explanation text
             ```json
             {"extractions": [{"item": "second"}]}
-            ```""")
+            ```"""
+        )
         resolver = resolver_lib.Resolver(
             fence_output=True,
             format_type=data.FormatType.JSON,
