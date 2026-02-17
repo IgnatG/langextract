@@ -452,19 +452,12 @@ class GCSBatchCache:
             "Cache write error for %s: %s", key_hash, e, exc_info=True
         )
 
-    def _json_default(obj):
-      if dataclasses.is_dataclass(obj):
-        return dataclasses.asdict(obj)
-      if isinstance(obj, enum.Enum):
-        return obj.value
-      raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
       for key_data, text in items:
         # If text is not a string, try to serialize it
         if not isinstance(text, str):
           try:
-            text = json.dumps(text, default=_json_default, ensure_ascii=False)
+            text = json.dumps(text, default=_json_serializer, ensure_ascii=False)
           except Exception as e:
             logging.warning("Serialization error: %s", e)
             continue
