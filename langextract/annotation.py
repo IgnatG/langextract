@@ -576,6 +576,7 @@ class Annotator:
                 show_progress=show_progress if pass_num == 0 else False,
                 context_window_chars=context_window_chars,
                 tokenizer=tokenizer,
+                pass_num=pass_num,
                 **kwargs,
             ):
                 doc_id = annotated_doc.document_id
@@ -976,6 +977,7 @@ class Annotator:
                 show_progress=show_progress if pass_num == 0 else False,
                 context_window_chars=context_window_chars,
                 tokenizer=tokenizer,
+                pass_num=pass_num,
                 **kwargs,
             )
 

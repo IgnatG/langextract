@@ -36,13 +36,13 @@ LangExtract is a Python library that uses LLMs to extract structured information
 
 ## Why LangExtract?
 
-1.  **Precise Source Grounding:** Maps every extraction to its exact location in the source text, enabling visual highlighting for easy traceability and verification.
-2.  **Reliable Structured Outputs:** Enforces a consistent output schema based on your few-shot examples, leveraging controlled generation in supported models like Gemini to guarantee robust, structured results.
-3.  **Optimized for Long Documents:** Overcomes the "needle-in-a-haystack" challenge of large document extraction by using an optimized strategy of text chunking, parallel processing, and multiple passes for higher recall.
-4.  **Interactive Visualization:** Instantly generates a self-contained, interactive HTML file to visualize and review thousands of extracted entities in their original context.
-5.  **Flexible LLM Support:** Supports your preferred models, from cloud-based LLMs like the Google Gemini family to local open-source models via the built-in Ollama interface.
-6.  **Adaptable to Any Domain:** Define extraction tasks for any domain using just a few examples. LangExtract adapts to your needs without requiring any model fine-tuning.
-7.  **Leverages LLM World Knowledge:** Utilize precise prompt wording and few-shot examples to influence how the extraction task may utilize LLM knowledge. The accuracy of any inferred information and its adherence to the task specification are contingent upon the selected LLM, the complexity of the task, the clarity of the prompt instructions, and the nature of the prompt examples.
+1. **Precise Source Grounding:** Maps every extraction to its exact location in the source text, enabling visual highlighting for easy traceability and verification.
+2. **Reliable Structured Outputs:** Enforces a consistent output schema based on your few-shot examples, leveraging controlled generation in supported models like Gemini to guarantee robust, structured results.
+3. **Optimized for Long Documents:** Overcomes the "needle-in-a-haystack" challenge of large document extraction by using an optimized strategy of text chunking, parallel processing, and multiple passes for higher recall.
+4. **Interactive Visualization:** Instantly generates a self-contained, interactive HTML file to visualize and review thousands of extracted entities in their original context.
+5. **Flexible LLM Support:** Supports your preferred models, from cloud-based LLMs like the Google Gemini family to local open-source models via the built-in Ollama interface.
+6. **Adaptable to Any Domain:** Define extraction tasks for any domain using just a few examples. LangExtract adapts to your needs without requiring any model fine-tuning.
+7. **Leverages LLM World Knowledge:** Utilize precise prompt wording and few-shot examples to influence how the extraction task may utilize LLM knowledge. The accuracy of any inferred information and its adherence to the task specification are contingent upon the selected LLM, the complexity of the task, the clarity of the prompt instructions, and the nature of the prompt examples.
 
 ## Quick Start
 
@@ -152,6 +152,12 @@ result = lx.extract(
 )
 ```
 
+> **Multi-pass & caching:** When `extraction_passes > 1`, the first pass uses
+> normal caching behaviour while subsequent passes include a `pass_num` keyword
+> argument that providers can use to bypass response caches. The
+> [langextract-litellm](https://github.com/JustStas/langextract-litellm)
+> provider does this automatically — passes ≥ 2 always hit the live LLM API.
+
 This approach can extract hundreds of entities from full novels while maintaining high accuracy. The interactive visualization seamlessly handles large result sets, making it easy to explore hundreds of entities from the output JSONL file. **[See the full *Romeo and Juliet* extraction example →](https://github.com/google/langextract/blob/main/docs/examples/longer_text_example.md)** for detailed results and performance insights.
 
 ### Vertex AI Batch Processing
@@ -181,7 +187,6 @@ pip install langextract
 LangExtract uses modern Python packaging with `pyproject.toml` for dependency management:
 
 *Installing with `-e` puts the package in development mode, allowing you to modify the code without reinstalling.*
-
 
 ```bash
 git clone https://github.com/google/langextract.git
@@ -215,9 +220,9 @@ extended to other third-party APIs by updating the inference endpoints.
 
 Get API keys from:
 
-*   [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
-*   [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
-*   [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
+- [AI Studio](https://aistudio.google.com/app/apikey) for Gemini models
+- [Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/sdks/overview) for enterprise use
+- [OpenAI Platform](https://platform.openai.com/api-keys) for OpenAI models
 
 ### Setting up API key in your environment
 
@@ -242,6 +247,7 @@ echo '.env' >> .gitignore
 ```
 
 In your Python code:
+
 ```python
 import langextract as lx
 
@@ -322,6 +328,7 @@ result = lx.extract(
 Note: OpenAI models require `fence_output=True` and `use_schema_constraints=False` because LangExtract doesn't implement schema constraints for OpenAI yet.
 
 ## Using Local LLMs with Ollama
+
 LangExtract supports local inference using Ollama, allowing you to run models without API keys:
 
 ```python
@@ -379,8 +386,6 @@ with development, testing, and pull requests. You must sign a
 [Contributor License Agreement](https://cla.developers.google.com/about)
 before submitting patches.
 
-
-
 ## Testing
 
 To run tests locally from the source:
@@ -432,6 +437,7 @@ pyink langextract tests --config pyproject.toml
 ### Pre-commit Hooks
 
 For automatic formatting checks:
+
 ```bash
 pre-commit install  # One-time setup
 pre-commit run --all-files  # Manual run
