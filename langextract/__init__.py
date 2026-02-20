@@ -26,10 +26,12 @@ from typing import Any, Dict
 
 from langextract import visualization
 from langextract.extraction import extract as extract_func
+from langextract.extraction import async_extract as async_extract_func
 
 __all__ = [
     # Public convenience functions (thin wrappers)
     "extract",
+    "async_extract",
     "visualize",
     # Submodules exposed lazily on attribute access for ergonomics:
     "annotation",
@@ -51,13 +53,18 @@ _CACHE: Dict[str, Any] = {}
 
 
 def extract(*args: Any, **kwargs: Any):
-  """Top-level API: lx.extract(...)."""
-  return extract_func(*args, **kwargs)
+    """Top-level API: lx.extract(...)."""
+    return extract_func(*args, **kwargs)
+
+
+async def async_extract(*args: Any, **kwargs: Any):
+    """Top-level async API: await lx.async_extract(...)."""
+    return await async_extract_func(*args, **kwargs)
 
 
 def visualize(*args: Any, **kwargs: Any):
-  """Top-level API: lx.visualize(...)."""
-  return visualization.visualize(*args, **kwargs)
+    """Top-level API: lx.visualize(...)."""
+    return visualization.visualize(*args, **kwargs)
 
 
 # PEP 562 lazy loading
@@ -85,18 +92,18 @@ _LAZY_MODULES = {
 
 
 def __getattr__(name: str) -> Any:
-  if name in _CACHE:
-    return _CACHE[name]
-  modpath = _LAZY_MODULES.get(name)
-  if modpath is None:
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-  module = importlib.import_module(modpath)
-  # ensure future 'import langextract.<name>' returns the same module
-  sys.modules[f"{__name__}.{name}"] = module
-  setattr(sys.modules[__name__], name, module)
-  _CACHE[name] = module
-  return module
+    if name in _CACHE:
+        return _CACHE[name]
+    modpath = _LAZY_MODULES.get(name)
+    if modpath is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(modpath)
+    # ensure future 'import langextract.<name>' returns the same module
+    sys.modules[f"{__name__}.{name}"] = module
+    setattr(sys.modules[__name__], name, module)
+    _CACHE[name] = module
+    return module
 
 
 def __dir__():
-  return sorted(__all__)
+    return sorted(__all__)
