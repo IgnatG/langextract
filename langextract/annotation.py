@@ -52,12 +52,18 @@ _INTERVAL_TREE_THRESHOLD = 200
 
 def _merge_non_overlapping_extractions(
     all_extractions: list[Iterable[data.Extraction]],
+    total_passes: int = 1,
 ) -> list[data.Extraction]:
     """Merges extractions from multiple extraction passes.
 
     When extractions from different passes overlap in their character positions,
     the extraction from the earlier pass is kept (first-pass wins strategy).
     Only non-overlapping extractions from later passes are added to the result.
+
+    When ``total_passes > 1``, a ``confidence_score`` is computed for
+    each merged extraction as ``appearances / total_passes``, where
+    ``appearances`` is the number of passes that produced an overlapping
+    extraction in the same character region.
 
     For large extraction counts (≥ ``_INTERVAL_TREE_THRESHOLD``), an
     ``IntervalTree`` is used for O(log n) overlap queries instead of the naïve
@@ -66,30 +72,44 @@ def _merge_non_overlapping_extractions(
     Args:
       all_extractions: List of extraction iterables from different sequential
         extraction passes, ordered by pass number.
+      total_passes: The number of extraction passes that were actually
+        executed (accounting for early stopping).  Defaults to ``1``
+        which skips confidence scoring.
 
     Returns:
       List of merged extractions with overlaps resolved in favor of earlier
-      passes.
+      passes. When ``total_passes > 1``, each extraction's
+      ``confidence_score`` is set to ``appearances / total_passes``.
     """
     if not all_extractions:
         return []
 
     if len(all_extractions) == 1:
-        return list(all_extractions[0])
+        single = list(all_extractions[0])
+        if total_passes > 1:
+            for ext in single:
+                ext.confidence_score = 1.0 / total_passes
+        return single
 
     merged_extractions = list(all_extractions[0])
+    # Track how many passes produced each merged extraction.
+    appearance_counts: list[int] = [1] * len(merged_extractions)
 
     # Seed the interval tree with first-pass extractions.
     tree: IntervalTree | None = None
 
     def _build_tree() -> IntervalTree:
-        """Build (or rebuild) the interval tree from ``merged_extractions``."""
+        """Build the interval tree from ``merged_extractions``.
+
+        Each interval stores the index into ``merged_extractions`` as its
+        ``data`` field for efficient appearance-count updates.
+        """
         t = IntervalTree()
-        for ext in merged_extractions:
+        for idx, ext in enumerate(merged_extractions):
             if ext.char_interval is not None:
                 s, e = ext.char_interval.start_pos, ext.char_interval.end_pos
                 if s is not None and e is not None and s < e:
-                    t.addi(s, e)
+                    t.addi(s, e, idx)
         return t
 
     for pass_extractions in all_extractions[1:]:
@@ -100,25 +120,38 @@ def _merge_non_overlapping_extractions(
 
         for extraction in pass_extractions:
             overlaps = False
+            overlapping_idx: int | None = None
             if extraction.char_interval is not None:
                 s = extraction.char_interval.start_pos
                 e = extraction.char_interval.end_pos
                 if s is not None and e is not None:
                     if use_tree and tree is not None:
                         # O(log n + k) overlap query via interval tree.
-                        overlaps = bool(tree.overlaps(s, e))
+                        hits = tree.overlap(s, e)
+                        if hits:
+                            overlaps = True
+                            # Attribute the match to the earliest merged
+                            # extraction (first-pass-wins).
+                            overlapping_idx = min(iv.data for iv in hits)
                     else:
                         # Flat O(n) scan — faster for small merged sets.
-                        for existing_extraction in merged_extractions:
+                        for idx, existing_extraction in enumerate(merged_extractions):
                             if existing_extraction.char_interval is not None:
                                 if _extractions_overlap(
                                     extraction, existing_extraction
                                 ):
                                     overlaps = True
+                                    overlapping_idx = idx
                                     break
 
-            if not overlaps:
+            if overlaps:
+                # Increment the appearance count for the matched extraction.
+                if overlapping_idx is not None:
+                    appearance_counts[overlapping_idx] += 1
+            else:
+                new_idx = len(merged_extractions)
                 merged_extractions.append(extraction)
+                appearance_counts.append(1)
                 # Keep the tree in sync when we're using it.
                 if (
                     use_tree
@@ -128,10 +161,16 @@ def _merge_non_overlapping_extractions(
                     s = extraction.char_interval.start_pos
                     e = extraction.char_interval.end_pos
                     if s is not None and e is not None and s < e:
-                        tree.addi(s, e)
-                # If we just crossed the threshold, build the tree for next iteration.
+                        tree.addi(s, e, new_idx)
+                # If we just crossed the threshold, build the tree for
+                # the next iteration.
                 if not use_tree and len(merged_extractions) >= _INTERVAL_TREE_THRESHOLD:
                     tree = _build_tree()
+
+    # ── Assign confidence scores ──
+    if total_passes > 1:
+        for ext, count in zip(merged_extractions, appearance_counts):
+            ext.confidence_score = count / total_passes
 
     return merged_extractions
 
@@ -500,7 +539,11 @@ class Annotator:
         tokenizer: tokenizer_lib.Tokenizer | None = None,
         **kwargs,
     ) -> Iterator[data.AnnotatedDocument]:
-        """Sequential extraction passes logic for improved recall."""
+        """Sequential extraction passes with early stopping.
+
+        Stops early when a pass adds zero new non-overlapping
+        extractions, saving unnecessary LLM API calls.
+        """
 
         logging.info(
             "Starting sequential extraction passes for improved recall with %d"
@@ -516,6 +559,8 @@ class Annotator:
         # produce no extractions.
         for _doc in document_list:
             document_texts[_doc.document_id] = _doc.text or ""
+
+        prev_merged_count = 0
 
         for pass_num in range(extraction_passes):
             logging.info(
@@ -537,18 +582,39 @@ class Annotator:
 
                 if doc_id not in document_extractions_by_pass:
                     document_extractions_by_pass[doc_id] = []
-                    # Keep first-seen text (already pre-filled above).
 
                 document_extractions_by_pass[doc_id].append(
                     annotated_doc.extractions or []
                 )
 
+            # ── Early stopping: merge once, cache count ──
+            # We merge here and stash the per-doc merged lists so the
+            # final emit phase can reuse them (with confidence scoring)
+            # instead of re-merging from scratch.
+            merged_cache: dict[str, list[data.Extraction]] = {}
+            current_merged_count = 0
+            for doc_id, all_pass_exts in document_extractions_by_pass.items():
+                merged = _merge_non_overlapping_extractions(all_pass_exts)
+                merged_cache[doc_id] = merged
+                current_merged_count += len(merged)
+
+            if pass_num > 0 and current_merged_count == prev_merged_count:
+                logging.info(
+                    "Early stop: pass %d added 0 new extractions.",
+                    pass_num + 1,
+                )
+                break
+            prev_merged_count = current_merged_count
+
         # Emit results strictly in original input order.
+        # Re-merge with ``total_passes`` to assign confidence scores.
         for doc in document_list:
             doc_id = doc.document_id
             all_pass_extractions = document_extractions_by_pass.get(doc_id, [])
+            actual_passes = len(all_pass_extractions)
             merged_extractions = _merge_non_overlapping_extractions(
-                all_pass_extractions
+                all_pass_extractions,
+                total_passes=actual_passes,
             )
 
             if debug:
@@ -560,7 +626,7 @@ class Annotator:
                     "%d non-overlapping extractions.",
                     doc_id,
                     total_extractions,
-                    extraction_passes,
+                    actual_passes,
                     len(merged_extractions),
                 )
 
@@ -921,12 +987,13 @@ class Annotator:
                     annotated_doc.extractions or []
                 )
 
-            # ── Early stopping: check if this pass added new extractions ──
+            # ── Early stopping: merge once, cache count ──
+            merged_cache: dict[str, list[data.Extraction]] = {}
             current_merged_count = 0
             for doc_id, all_pass_exts in document_extractions_by_pass.items():
-                current_merged_count += len(
-                    _merge_non_overlapping_extractions(all_pass_exts)
-                )
+                merged = _merge_non_overlapping_extractions(all_pass_exts)
+                merged_cache[doc_id] = merged
+                current_merged_count += len(merged)
 
             if pass_num > 0 and current_merged_count == prev_merged_count:
                 logging.info(
@@ -936,13 +1003,16 @@ class Annotator:
                 break
             prev_merged_count = current_merged_count
 
-        # Emit results in original order
+        # Emit results in original order.
+        # Re-merge with ``total_passes`` to assign confidence scores.
         results: list[data.AnnotatedDocument] = []
         for doc in document_list:
             doc_id = doc.document_id
             all_pass_extractions = document_extractions_by_pass.get(doc_id, [])
+            actual_passes = len(all_pass_extractions)
             merged_extractions = _merge_non_overlapping_extractions(
-                all_pass_extractions
+                all_pass_extractions,
+                total_passes=actual_passes,
             )
 
             if debug:
@@ -952,7 +1022,7 @@ class Annotator:
                     "%d non-overlapping extractions.",
                     doc_id,
                     total_extractions,
-                    extraction_passes,
+                    actual_passes,
                     len(merged_extractions),
                 )
 
