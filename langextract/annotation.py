@@ -820,6 +820,9 @@ class Annotator:
         doc_order: list[str] = []
         doc_text_by_id: dict[str, str] = {}
         per_doc: DefaultDict[str, list[data.Extraction]] = collections.defaultdict(list)
+        doc_usage: DefaultDict[str, dict[str, int]] = collections.defaultdict(
+            lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        )
 
         def _capture_docs(
             src: Iterable[data.Document],
@@ -887,6 +890,19 @@ class Annotator:
                 for extraction in aligned_extractions:
                     per_doc[text_chunk.document_id].append(extraction)
 
+                # Accumulate token usage if available
+                if scored_outputs[0].usage:
+                    usage = scored_outputs[0].usage
+                    doc_usage[text_chunk.document_id]["prompt_tokens"] += usage.get(
+                        "prompt_tokens", 0
+                    )
+                    doc_usage[text_chunk.document_id]["completion_tokens"] += usage.get(
+                        "completion_tokens", 0
+                    )
+                    doc_usage[text_chunk.document_id]["total_tokens"] += usage.get(
+                        "total_tokens", 0
+                    )
+
         for batch in batches:
             if not batch:
                 continue
@@ -921,11 +937,15 @@ class Annotator:
         # Build results in document order
         results: list[data.AnnotatedDocument] = []
         for document_id in doc_order:
+            usage = doc_usage.get(document_id)
+            if usage and usage["total_tokens"] == 0:
+                usage = None
             results.append(
                 data.AnnotatedDocument(
                     document_id=document_id,
                     extractions=per_doc.get(document_id, []),
                     text=doc_text_by_id.get(document_id, ""),
+                    usage=usage,
                 )
             )
         return results
@@ -955,6 +975,9 @@ class Annotator:
 
         document_list = list(documents)
         document_extractions_by_pass: dict[str, list[list[data.Extraction]]] = {}
+        document_usage: dict[str, dict[str, int]] = collections.defaultdict(
+            lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        )
         document_texts: dict[str, str] = {}
         for _doc in document_list:
             document_texts[_doc.document_id] = _doc.text or ""
@@ -988,6 +1011,16 @@ class Annotator:
                 document_extractions_by_pass[doc_id].append(
                     annotated_doc.extractions or []
                 )
+                if annotated_doc.usage:
+                    document_usage[doc_id]["prompt_tokens"] += annotated_doc.usage.get(
+                        "prompt_tokens", 0
+                    )
+                    document_usage[doc_id][
+                        "completion_tokens"
+                    ] += annotated_doc.usage.get("completion_tokens", 0)
+                    document_usage[doc_id]["total_tokens"] += annotated_doc.usage.get(
+                        "total_tokens", 0
+                    )
 
             # ── Early stopping: merge once, cache count ──
             merged_cache: dict[str, list[data.Extraction]] = {}
@@ -1028,11 +1061,16 @@ class Annotator:
                     len(merged_extractions),
                 )
 
+            usage = document_usage.get(doc_id)
+            if usage and usage["total_tokens"] == 0:
+                usage = None
+
             results.append(
                 data.AnnotatedDocument(
                     document_id=doc_id,
                     extractions=merged_extractions,
                     text=document_texts.get(doc_id, doc.text or ""),
+                    usage=usage,
                 )
             )
 

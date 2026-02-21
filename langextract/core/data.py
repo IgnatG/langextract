@@ -196,10 +196,12 @@ class AnnotatedDocument:
       extractions: List of extractions in the document.
       text: Raw text representation of the document.
       tokenized_text: Tokenized text of the document, computed from `text`.
+      usage: Optional token usage statistics from the language model.
     """
 
     extractions: list[Extraction] | None = None
     text: str | None = None
+    usage: dict[str, int] | None = None
     _document_id: str | None = dataclasses.field(
         default=None, init=False, repr=False, compare=False
     )
@@ -213,9 +215,11 @@ class AnnotatedDocument:
         document_id: str | None = None,
         extractions: list[Extraction] | None = None,
         text: str | None = None,
+        usage: dict[str, int] | None = None,
     ):
         self.extractions = extractions
         self.text = text
+        self.usage = usage
         self._document_id = document_id
 
     @property
